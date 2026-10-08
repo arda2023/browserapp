@@ -18,7 +18,7 @@ struct ContentView: View {
     }
 
     private var addressBar: some View {
-        TextField("Suchen oder Adresse eingeben", text: $browser.addressText)
+        TextField("Mit Yandex suchen oder Adresse eingeben", text: $browser.addressText)
             .textFieldStyle(.roundedBorder)
             .keyboardType(.webSearch)
             .textInputAutocapitalization(.never)
@@ -53,12 +53,25 @@ struct ContentView: View {
                 Image(systemName: browser.isLoading ? "xmark" : "arrow.clockwise")
             }
             Spacer()
+            adblockToggle
+            Spacer()
             blockerToggle
         }
         .font(.title3)
-        .padding(.horizontal, 32)
+        .padding(.horizontal, 24)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    /// Hand-Button: Werbeblocker an/aus.
+    private var adblockToggle: some View {
+        Button {
+            browser.adblockEnabled.toggle()
+        } label: {
+            Image(systemName: browser.adblockEnabled ? "hand.raised.fill" : "hand.raised.slash")
+                .foregroundStyle(browser.adblockEnabled ? .orange : .secondary)
+        }
+        .accessibilityLabel(browser.adblockEnabled ? "Werbeblocker an" : "Werbeblocker aus")
     }
 
     /// Schild-Button: Pop-up-Blocker an/aus, mit Zähler der blockierten Tabs.

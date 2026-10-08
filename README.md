@@ -12,6 +12,11 @@ aktuellen Tab auf Werbung um. Mit dem Schild-Button (an/aus) wird das verhindert
 
 Ein Zähler zeigt, wie viele Pop-ups blockiert wurden.
 
+## Werbeblocker (Hand-Button)
+Blockiert Anfragen an bekannte Werbe-Server (Liste: `StreamBrowser/adblock_domains.json`). An/aus per Hand-Button.
+
+Startseite und Suchmaschine: Yandex.
+
 ## Auf dem iPhone installieren
 1. `StreamBrowser.xcodeproj` in Xcode öffnen.
 2. Target *StreamBrowser* → *Signing & Capabilities* → dein Team (Apple-ID) wählen.

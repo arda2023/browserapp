@@ -26,7 +26,20 @@ final class BrowserModel: NSObject, ObservableObject {
     /// Zuletzt blockierte Adresse – kann über das Banner trotzdem geöffnet werden.
     @Published var lastBlockedURL: URL?
 
+    /// Blockiert Anfragen an bekannte Werbe-Server (Liste in adblock_domains.json).
+    @Published var adblockEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(adblockEnabled, forKey: Self.adblockKey)
+            applyAdblockRules()
+            userInitiatedLoad = true
+            webView.reload()
+        }
+    }
+    private var adblockRules: WKContentRuleList?
+
     private static let blockerKey = "blockerEnabled"
+    private static let adblockKey = "adblockEnabled"
+    static let homeURL = "https://yandex.com"
     private static let popupMessage = "popupBlocked"
 
     /// true, solange eine vom Nutzer gestartete Navigation läuft (Eingabe, Zurück, Neu laden).
@@ -47,14 +60,18 @@ final class BrowserModel: NSObject, ObservableObject {
         webView = WKWebView(frame: .zero, configuration: config)
         webView.allowsBackForwardNavigationGestures = true
         blockerEnabled = UserDefaults.standard.object(forKey: Self.blockerKey) as? Bool ?? true
+        adblockEnabled = UserDefaults.standard.object(forKey: Self.adblockKey) as? Bool ?? true
         super.init()
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
         installUserScripts()
         observeWebView()
-        // Startseite; zum Testen überschreibbar per Launch-Argument "-startURL <url>".
-        load(UserDefaults.standard.string(forKey: "startURL") ?? "https://www.google.com")
+        // Regeln erst kompilieren, dann die Startseite laden, damit schon die erste Seite gefiltert wird.
+        compileAdblockRules { [weak self] in
+            // Startseite; zum Testen überschreibbar per Launch-Argument "-startURL <url>".
+            self?.load(UserDefaults.standard.string(forKey: "startURL") ?? Self.homeURL)
+        }
     }
 
     private func observeWebView() {
@@ -73,7 +90,7 @@ final class BrowserModel: NSObject, ObservableObject {
 
     // MARK: - Navigation
 
-    /// Lädt eine URL oder startet eine Google-Suche, wenn die Eingabe keine Adresse ist.
+    /// Lädt eine URL oder startet eine Yandex-Suche, wenn die Eingabe keine Adresse ist.
     func load(_ input: String) {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -84,8 +101,8 @@ final class BrowserModel: NSObject, ObservableObject {
         } else if text.contains("."), !text.contains(" ") {
             url = URL(string: "https://" + text)
         } else {
-            var components = URLComponents(string: "https://www.google.com/search")
-            components?.queryItems = [URLQueryItem(name: "q", value: text)]
+            var components = URLComponents(string: "https://yandex.com/search/")
+            components?.queryItems = [URLQueryItem(name: "text", value: text)]
             url = components?.url
         }
         if let url { loadUserInitiated(URLRequest(url: url)) }
@@ -151,6 +168,45 @@ final class BrowserModel: NSObject, ObservableObject {
         })();
         """
         controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+    }
+
+    // MARK: - Werbeblocker
+
+    /// Baut aus der Domainliste WebKit-Blockregeln (gilt für die Domain und alle Subdomains).
+    private func compileAdblockRules(completion: @escaping () -> Void) {
+        guard let file = Bundle.main.url(forResource: "adblock_domains", withExtension: "json"),
+              let data = try? Data(contentsOf: file),
+              let domains = try? JSONDecoder().decode([String].self, from: data) else {
+            completion()
+            return
+        }
+        let rules: [[String: Any]] = domains.map { domain in
+            let escaped = domain.replacingOccurrences(of: ".", with: "\\.")
+            return [
+                "trigger": ["url-filter": "^[^:]+://+([^:/]+\\.)?\(escaped)[:/]"],
+                "action": ["type": "block"],
+            ]
+        }
+        guard let json = try? JSONSerialization.data(withJSONObject: rules),
+              let source = String(data: json, encoding: .utf8) else {
+            completion()
+            return
+        }
+        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "adblock", encodedContentRuleList: source) { [weak self] list, error in
+            DispatchQueue.main.async {
+                if let error { print("Adblock-Regeln fehlerhaft: \(error)") }
+                self?.adblockRules = list
+                self?.applyAdblockRules()
+                completion()
+            }
+        }
+    }
+
+    private func applyAdblockRules() {
+        guard let adblockRules else { return }
+        let controller = webView.configuration.userContentController
+        controller.remove(adblockRules)
+        if adblockEnabled { controller.add(adblockRules) }
     }
 
     /// Grobe Annäherung an die Hauptdomain (letzte zwei Labels), z. B. "video.example.com" → "example.com".
