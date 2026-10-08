@@ -12,6 +12,7 @@ struct ContentView: View {
                     .progressViewStyle(.linear)
             }
             WebView(webView: browser.webView)
+                .overlay(alignment: .bottom) { blockedBanner }
             toolbar
         }
     }
@@ -25,6 +26,17 @@ struct ContentView: View {
             .submitLabel(.go)
             .focused($addressFocused)
             .onSubmit { browser.load(browser.addressText) }
+            .onChange(of: addressFocused) { _, focused in
+                browser.isEditingAddress = focused
+                if focused {
+                    // Gesamten Text markieren, damit man direkt eine neue Adresse tippen kann.
+                    DispatchQueue.main.async {
+                        UIApplication.shared.sendAction(#selector(UIResponder.selectAll(_:)), to: nil, from: nil, for: nil)
+                    }
+                } else if let url = browser.webView.url {
+                    browser.addressText = url.absoluteString
+                }
+            }
             .padding(.horizontal)
             .padding(.vertical, 8)
     }
@@ -40,11 +52,64 @@ struct ContentView: View {
             Button(action: browser.reloadOrStop) {
                 Image(systemName: browser.isLoading ? "xmark" : "arrow.clockwise")
             }
+            Spacer()
+            blockerToggle
         }
         .font(.title3)
         .padding(.horizontal, 32)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    /// Schild-Button: Pop-up-Blocker an/aus, mit Zähler der blockierten Tabs.
+    private var blockerToggle: some View {
+        Button {
+            browser.blockerEnabled.toggle()
+        } label: {
+            Image(systemName: browser.blockerEnabled ? "checkmark.shield.fill" : "shield.slash")
+                .foregroundStyle(browser.blockerEnabled ? .green : .secondary)
+                .overlay(alignment: .topTrailing) {
+                    if browser.blockerEnabled && browser.blockedCount > 0 {
+                        Text("\(browser.blockedCount)")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .background(Capsule().fill(.red))
+                            .offset(x: 10, y: -8)
+                    }
+                }
+        }
+        .accessibilityLabel(browser.blockerEnabled ? "Pop-up-Blocker an" : "Pop-up-Blocker aus")
+    }
+
+    @ViewBuilder
+    private var blockedBanner: some View {
+        if let url = browser.lastBlockedURL {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("Pop-up blockiert").font(.subheadline.bold())
+                    Text(url.host ?? url.absoluteString)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Öffnen", action: browser.openLastBlocked)
+                Button {
+                    browser.lastBlockedURL = nil
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Schließen")
+            }
+            .padding(12)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .padding()
+            .task(id: url) {
+                try? await Task.sleep(for: .seconds(4))
+                if browser.lastBlockedURL == url { browser.lastBlockedURL = nil }
+            }
+        }
     }
 }
 
