@@ -188,13 +188,31 @@
     }
   }
 
+  // Wiedergabe sicherstellen. Chrome pausiert Videos, die ohne Antippen wieder laut gestellt
+  // werden – dann lieber stumm weiterspielen als stehen bleiben.
+  function keepPlaying(video) {
+    if (!video.paused || video.ended) return;
+    var attempt = video.play();
+    if (attempt && attempt.catch) {
+      attempt.catch(function () {
+        video.muted = true;
+        video.play().catch(function () {});
+      });
+    }
+  }
+
   function restore(video) {
     if (!video.dataset.sbAd) return;
+    var wasPlaying = !video.paused;
     video.muted = video.dataset.sbMuted === '1';
     try { video.playbackRate = parseFloat(video.dataset.sbRate) || 1; } catch (e) {}
     delete video.dataset.sbAd;
     delete video.dataset.sbMuted;
     delete video.dataset.sbRate;
+    if (wasPlaying) {
+      keepPlaying(video);
+      setTimeout(function () { keepPlaying(video); }, 150);
+    }
   }
 
   function check() {
