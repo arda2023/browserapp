@@ -1,8 +1,40 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var browser = BrowserModel()
+    @StateObject private var tabs = TabManager()
+    @State private var showTabs = false
+
+    var body: some View {
+        Group {
+            if let tab = tabs.selected {
+                // .id: beim Tab-Wechsel wird die Ansicht samt WebView neu aufgebaut.
+                BrowserView(browser: tab, tabs: tabs, showTabs: $showTabs)
+                    .id(tab.id)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .sheet(isPresented: $showTabs) {
+            TabOverview(tabs: tabs)
+        }
+    }
+}
+
+/// Ansicht eines einzelnen Tabs: Adressleiste, Seite, Werkzeugleiste.
+struct BrowserView: View {
+    @ObservedObject var browser: BrowserModel
+    @ObservedObject var tabs: TabManager
+    @ObservedObject private var adBlock: AdBlockManager
+    @Binding var showTabs: Bool
     @FocusState private var addressFocused: Bool
+
+    init(browser: BrowserModel, tabs: TabManager, showTabs: Binding<Bool>) {
+        self.browser = browser
+        self.tabs = tabs
+        self.adBlock = tabs.adBlock
+        self._showTabs = showTabs
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,27 +50,33 @@ struct ContentView: View {
     }
 
     private var addressBar: some View {
-        TextField("Mit Yandex suchen oder Adresse eingeben", text: $browser.addressText)
-            .textFieldStyle(.roundedBorder)
-            .keyboardType(.webSearch)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .submitLabel(.go)
-            .focused($addressFocused)
-            .onSubmit { browser.load(browser.addressText) }
-            .onChange(of: addressFocused) { _, focused in
-                browser.isEditingAddress = focused
-                if focused {
-                    // Gesamten Text markieren, damit man direkt eine neue Adresse tippen kann.
-                    DispatchQueue.main.async {
-                        UIApplication.shared.sendAction(#selector(UIResponder.selectAll(_:)), to: nil, from: nil, for: nil)
+        HStack(spacing: 12) {
+            TextField("Mit Yandex suchen oder Adresse eingeben", text: $browser.addressText)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.webSearch)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .focused($addressFocused)
+                .onSubmit { browser.load(browser.addressText) }
+                .onChange(of: addressFocused) { _, focused in
+                    browser.isEditingAddress = focused
+                    if focused {
+                        // Gesamten Text markieren, damit man direkt eine neue Adresse tippen kann.
+                        DispatchQueue.main.async {
+                            UIApplication.shared.sendAction(#selector(UIResponder.selectAll(_:)), to: nil, from: nil, for: nil)
+                        }
+                    } else if let url = browser.webView.url {
+                        browser.addressText = url.absoluteString
                     }
-                } else if let url = browser.webView.url {
-                    browser.addressText = url.absoluteString
                 }
+            Button(action: browser.reloadOrStop) {
+                Image(systemName: browser.isLoading ? "xmark" : "arrow.clockwise")
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .accessibilityLabel(browser.isLoading ? "Stopp" : "Neu laden")
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
     private var toolbar: some View {
@@ -49,9 +87,7 @@ struct ContentView: View {
             Button(action: browser.goForward) { Image(systemName: "chevron.right") }
                 .disabled(!browser.canGoForward)
             Spacer()
-            Button(action: browser.reloadOrStop) {
-                Image(systemName: browser.isLoading ? "xmark" : "arrow.clockwise")
-            }
+            tabsButton
             Spacer()
             adblockToggle
             Spacer()
@@ -63,27 +99,56 @@ struct ContentView: View {
         .background(.bar)
     }
 
-    /// Hand-Button: Werbeblocker an/aus.
+    /// Öffnet die Tab-Übersicht; zeigt die Anzahl offener Tabs.
+    private var tabsButton: some View {
+        Button {
+            showTabs = true
+        } label: {
+            Image(systemName: "square")
+                .overlay {
+                    Text("\(tabs.tabs.count)")
+                        .font(.caption.bold())
+                }
+        }
+        .accessibilityLabel("Tabs, \(tabs.tabs.count) offen")
+    }
+
+    /// Hand-Button: Werbeblocker an/aus. Gedrückt halten zeigt den EasyList-Stand.
     private var adblockToggle: some View {
         Button {
-            browser.adblockEnabled.toggle()
+            tabs.adblockEnabled.toggle()
         } label: {
-            Image(systemName: browser.adblockEnabled ? "hand.raised.fill" : "hand.raised.slash")
-                .foregroundStyle(browser.adblockEnabled ? .orange : .secondary)
+            Image(systemName: tabs.adblockEnabled ? "hand.raised.fill" : "hand.raised.slash")
+                .foregroundStyle(tabs.adblockEnabled ? .orange : .secondary)
         }
-        .accessibilityLabel(browser.adblockEnabled ? "Werbeblocker an" : "Werbeblocker aus")
+        .contextMenu {
+            Text("\(adBlock.ruleCount.formatted()) Filterregeln")
+            if let date = adBlock.lastUpdate {
+                Text("EasyList-Stand: \(date.formatted(date: .abbreviated, time: .shortened))")
+            } else {
+                Text("EasyList noch nicht geladen")
+            }
+            Button {
+                Task { await adBlock.update() }
+            } label: {
+                Label(adBlock.isUpdating ? "Wird aktualisiert …" : "Filterlisten aktualisieren",
+                      systemImage: "arrow.down.circle")
+            }
+            .disabled(adBlock.isUpdating)
+        }
+        .accessibilityLabel(tabs.adblockEnabled ? "Werbeblocker an" : "Werbeblocker aus")
     }
 
     /// Schild-Button: Pop-up-Blocker an/aus, mit Zähler der blockierten Tabs.
     private var blockerToggle: some View {
         Button {
-            browser.blockerEnabled.toggle()
+            tabs.blockerEnabled.toggle()
         } label: {
-            Image(systemName: browser.blockerEnabled ? "checkmark.shield.fill" : "shield.slash")
-                .foregroundStyle(browser.blockerEnabled ? .green : .secondary)
+            Image(systemName: tabs.blockerEnabled ? "checkmark.shield.fill" : "shield.slash")
+                .foregroundStyle(tabs.blockerEnabled ? .green : .secondary)
                 .overlay(alignment: .topTrailing) {
-                    if browser.blockerEnabled && browser.blockedCount > 0 {
-                        Text("\(browser.blockedCount)")
+                    if tabs.blockerEnabled && tabs.blockedCount > 0 {
+                        Text("\(tabs.blockedCount)")
                             .font(.caption2.bold())
                             .foregroundStyle(.white)
                             .padding(.horizontal, 4)
@@ -92,12 +157,12 @@ struct ContentView: View {
                     }
                 }
         }
-        .accessibilityLabel(browser.blockerEnabled ? "Pop-up-Blocker an" : "Pop-up-Blocker aus")
+        .accessibilityLabel(tabs.blockerEnabled ? "Pop-up-Blocker an" : "Pop-up-Blocker aus")
     }
 
     @ViewBuilder
     private var blockedBanner: some View {
-        if let url = browser.lastBlockedURL {
+        if let url = tabs.lastBlockedURL {
             HStack {
                 VStack(alignment: .leading) {
                     Text("Pop-up blockiert").font(.subheadline.bold())
@@ -107,9 +172,9 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Öffnen", action: browser.openLastBlocked)
+                Button("Öffnen", action: tabs.openLastBlocked)
                 Button {
-                    browser.lastBlockedURL = nil
+                    tabs.lastBlockedURL = nil
                 } label: {
                     Image(systemName: "xmark")
                 }
@@ -120,7 +185,7 @@ struct ContentView: View {
             .padding()
             .task(id: url) {
                 try? await Task.sleep(for: .seconds(4))
-                if browser.lastBlockedURL == url { browser.lastBlockedURL = nil }
+                if tabs.lastBlockedURL == url { tabs.lastBlockedURL = nil }
             }
         }
     }

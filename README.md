@@ -13,7 +13,19 @@ aktuellen Tab auf Werbung um. Mit dem Schild-Button (an/aus) wird das verhindert
 Ein Zähler zeigt, wie viele Pop-ups blockiert wurden.
 
 ## Werbeblocker (Hand-Button)
-Blockiert Anfragen an bekannte Werbe-Server (Liste: `StreamBrowser/adblock_domains.json`). An/aus per Hand-Button.
+Echte Filterlisten wie bei Brave/Opera:
+
+- `AdBlockManager` lädt **EasyList**, wandelt sie mit AdGuards
+  [ContentBlockerConverter](https://github.com/AdguardTeam/SafariConverterLib) (Swift Package, ab 4.3.0)
+  in Safari-Regeln um und kompiliert sie zu einer `WKContentRuleList`.
+- Die kompilierte Liste wird über `WKContentRuleListStore` dauerhaft gespeichert – beim Start nur nachgeschlagen,
+  nicht neu kompiliert. Aktualisiert wird alle 3 Tage (oder per langem Druck auf den Hand-Button).
+- Beim allerersten Start (oder offline) gilt sofort die mitgelieferte Liste `adblock_domains.json`.
+- Blockiert Werbe-Server **und** blendet Werbe-Elemente per CSS aus.
+
+## Tabs
+Tab-Button unten (zeigt die Anzahl) → Übersicht: antippen zum Wechseln, ✕ oder Wischen zum Schließen, + für neuen Tab.
+Webseiten selbst können weiterhin keine Tabs öffnen. Neu laden sitzt rechts neben der Adressleiste.
 
 Startseite und Suchmaschine: Yandex.
 
