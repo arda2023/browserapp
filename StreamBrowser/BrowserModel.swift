@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 import WebKit
 
 /// Ein Browser-Tab mit eigener WKWebView. Blocker-Einstellungen setzt der `TabManager`.
@@ -16,12 +17,29 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
     @Published private(set) var isLoading = false
     @Published private(set) var progress = 0.0
 
+    /// Vorschaubild der Seite für die Tab-Übersicht.
+    @Published private(set) var snapshot: UIImage?
+
     /// Blockiert neue Tabs/Fenster und automatische Weiterleitungen auf fremde Seiten.
     private(set) var blockerEnabled: Bool
+    /// Werbeblocker an: Filterregeln + Video-Werbeblocker-Skript.
+    private(set) var adblockEnabled: Bool
     /// Wird bei jedem blockierten Pop-up / jeder blockierten Weiterleitung aufgerufen.
     var onBlocked: ((URL?) -> Void)?
+    /// Wird aufgerufen, wenn das Skript Videowerbung entfernt oder übersprungen hat.
+    var onAdSkipped: (() -> Void)?
 
     private static let popupMessage = "popupBlocked"
+    private static let adSkippedMessage = "adSkipped"
+
+    /// Video-Werbeblocker (video_adblock.js), einmal aus dem Bundle geladen.
+    private static let videoAdblockScript: WKUserScript? = {
+        guard let url = Bundle.main.url(forResource: "video_adblock", withExtension: "js"),
+              let source = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        // Dokumentbeginn: YouTube-Daten müssen bereinigt sein, bevor der Player startet.
+        // Alle Frames: Videoplayer stecken auf Streaming-Seiten meist in iframes.
+        return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+    }()
     static let homeURL = "https://yandex.com"
 
     /// true, solange eine vom Nutzer gestartete Navigation läuft (Eingabe, Zurück, Neu laden).
@@ -31,7 +49,7 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
     private var contentRules: WKContentRuleList?
     private var cancellables = Set<AnyCancellable>()
 
-    init(url: String, blockerEnabled: Bool, contentRules: WKContentRuleList?) {
+    init(url: String, blockerEnabled: Bool, adblockEnabled: Bool, contentRules: WKContentRuleList?) {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -43,6 +61,7 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         webView = WKWebView(frame: .zero, configuration: config)
         webView.allowsBackForwardNavigationGestures = true
         self.blockerEnabled = blockerEnabled
+        self.adblockEnabled = adblockEnabled
         super.init()
 
         webView.navigationDelegate = self
@@ -124,6 +143,22 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         installUserScripts()
     }
 
+    func setAdblockEnabled(_ enabled: Bool) {
+        adblockEnabled = enabled
+        installUserScripts()
+    }
+
+    /// Macht ein Vorschaubild der sichtbaren Seite für die Tab-Übersicht.
+    @MainActor
+    func captureSnapshot() async {
+        guard webView.window != nil, webView.bounds.width > 0 else { return }
+        let config = WKSnapshotConfiguration()
+        config.snapshotWidth = 400
+        if let image = try? await webView.takeSnapshot(configuration: config) {
+            snapshot = image
+        }
+    }
+
     /// Hängt die Werbeblocker-Regeln an (oder entfernt sie mit nil).
     func setContentRules(_ rules: WKContentRuleList?) {
         let controller = webView.configuration.userContentController
@@ -142,6 +177,12 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         controller.removeScriptMessageHandler(forName: Self.popupMessage)
+        controller.removeScriptMessageHandler(forName: Self.adSkippedMessage)
+
+        if adblockEnabled, let videoAdblockScript = Self.videoAdblockScript {
+            controller.add(WeakScriptHandler(self), name: Self.adSkippedMessage)
+            controller.addUserScript(videoAdblockScript)
+        }
         guard blockerEnabled else { return }
 
         controller.add(WeakScriptHandler(self), name: Self.popupMessage)
@@ -203,6 +244,7 @@ extension BrowserModel: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         userInitiatedLoad = false
+        Task { await captureSnapshot() }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -233,6 +275,10 @@ extension BrowserModel: WKUIDelegate {
 
 extension BrowserModel: WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == Self.adSkippedMessage {
+            onAdSkipped?()
+            return
+        }
         guard message.name == Self.popupMessage else { return }
         registerBlocked(URL(string: message.body as? String ?? "", relativeTo: webView.url)?.absoluteURL)
     }

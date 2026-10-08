@@ -15,7 +15,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .sheet(isPresented: $showTabs) {
+        .fullScreenCover(isPresented: $showTabs) {
             TabOverview(tabs: tabs)
         }
     }
@@ -102,7 +102,11 @@ struct BrowserView: View {
     /// Öffnet die Tab-Übersicht; zeigt die Anzahl offener Tabs.
     private var tabsButton: some View {
         Button {
-            showTabs = true
+            // Erst aktuelles Vorschaubild aufnehmen, dann Übersicht zeigen.
+            Task {
+                await browser.captureSnapshot()
+                showTabs = true
+            }
         } label: {
             Image(systemName: "square")
                 .overlay {
@@ -120,9 +124,20 @@ struct BrowserView: View {
         } label: {
             Image(systemName: tabs.adblockEnabled ? "hand.raised.fill" : "hand.raised.slash")
                 .foregroundStyle(tabs.adblockEnabled ? .orange : .secondary)
+                .overlay(alignment: .topTrailing) {
+                    if tabs.adblockEnabled && tabs.skippedAdCount > 0 {
+                        Text("\(tabs.skippedAdCount)")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .background(Capsule().fill(.orange))
+                            .offset(x: 10, y: -8)
+                    }
+                }
         }
         .contextMenu {
             Text("\(adBlock.ruleCount.formatted()) Filterregeln")
+            Text("\(tabs.skippedAdCount) Videowerbungen entfernt")
             if let date = adBlock.lastUpdate {
                 Text("EasyList-Stand: \(date.formatted(date: .abbreviated, time: .shortened))")
             } else {

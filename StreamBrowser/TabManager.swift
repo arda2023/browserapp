@@ -22,11 +22,14 @@ final class TabManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(adblockEnabled, forKey: Self.adblockKey)
             applyContentRules()
+            tabs.forEach { $0.setAdblockEnabled(adblockEnabled) }
             selected?.reload()
         }
     }
 
     @Published private(set) var blockedCount = 0
+    /// Anzahl entfernter/übersprungener Videowerbungen.
+    @Published private(set) var skippedAdCount = 0
     /// Zuletzt blockierte Adresse – kann über das Banner trotzdem geöffnet werden.
     @Published var lastBlockedURL: URL?
 
@@ -70,9 +73,11 @@ final class TabManager: ObservableObject {
         let tab = BrowserModel(
             url: url,
             blockerEnabled: blockerEnabled,
+            adblockEnabled: adblockEnabled,
             contentRules: adblockEnabled ? adBlock.ruleList : nil
         )
         tab.onBlocked = { [weak self] url in self?.registerBlocked(url) }
+        tab.onAdSkipped = { [weak self] in self?.skippedAdCount += 1 }
         tabs.append(tab)
         selectedID = tab.id
         return tab

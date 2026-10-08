@@ -23,8 +23,20 @@ Echte Filterlisten wie bei Brave/Opera:
 - Beim allerersten Start (oder offline) gilt sofort die mitgelieferte Liste `adblock_domains.json`.
 - Blockiert Werbe-Server **und** blendet Werbe-Elemente per CSS aus.
 
+## Videowerbung (Teil des Werbeblockers)
+`video_adblock.js` läuft als `WKUserScript` zu Dokumentbeginn in allen Frames:
+1. **YouTube:** entfernt `adPlacements`, `playerAds`, `adSlots` aus den Player-Daten (`ytInitialPlayerResponse`,
+   `JSON.parse`, `fetch().json()`), bevor der Player sie sieht → Pre-Roll wird gar nicht erst geladen.
+2. **CSS:** versteckt Werbe-Overlays, Banner und während einer Werbung das Bild und die gelbe Fortschrittsleiste.
+3. **Fallback auf allen Seiten** (YouTube, JW Player, Video.js/IMA, Fluid Player, Plyr, VAST …): Skip-Buttons werden sofort
+   geklickt; nicht überspringbare Werbung wird stumm geschaltet, auf 16-fache Geschwindigkeit gesetzt und ans Ende gespult.
+   Danach werden Ton und Geschwindigkeit des echten Videos wiederhergestellt.
+
+Der Zähler am Hand-Button zeigt, wie viele Videowerbungen entfernt wurden.
+
 ## Tabs
-Tab-Button unten (zeigt die Anzahl) → Übersicht: antippen zum Wechseln, ✕ oder Wischen zum Schließen, + für neuen Tab.
+Tab-Button unten (zeigt die Anzahl) → Übersicht im Opera-Stil mit Vorschaubild jeder Seite:
+antippen zum Wechseln, ✕ zum Schließen, + für neuen Tab.
 Webseiten selbst können weiterhin keine Tabs öffnen. Neu laden sitzt rechts neben der Adressleiste.
 
 Startseite und Suchmaschine: Yandex.
