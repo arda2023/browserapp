@@ -80,7 +80,7 @@ private struct TabCard: View {
     let isSelected: Bool
     let onClose: () -> Void
 
-    private var host: String? { tab.webView.url?.host }
+    private var host: String? { URL(string: tab.currentURL)?.host }
 
     var body: some View {
         VStack(spacing: 0) {

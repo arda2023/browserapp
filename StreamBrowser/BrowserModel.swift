@@ -5,7 +5,7 @@ import WebKit
 
 /// Ein Browser-Tab mit eigener WKWebView. Blocker-Einstellungen setzt der `TabManager`.
 final class BrowserModel: NSObject, ObservableObject, Identifiable {
-    let id = UUID()
+    let id: UUID
     let webView: WKWebView
 
     @Published var addressText = ""
@@ -17,8 +17,17 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
     @Published private(set) var isLoading = false
     @Published private(set) var progress = 0.0
 
-    /// Vorschaubild der Seite für die Tab-Übersicht.
+    /// Vorschaubild der Seite für die Tab-Übersicht (wird auch auf dem Gerät gespeichert).
     @Published private(set) var snapshot: UIImage?
+
+    /// Adresse, die beim ersten Anzeigen geladen wird. Wiederhergestellte Tabs laden erst,
+    /// wenn man sie öffnet – das spart Akku und Daten.
+    private var pendingURL: String?
+    /// Wird bei Adress- oder Titeländerung aufgerufen (zum Speichern der Tabs).
+    var onStateChange: (() -> Void)?
+
+    /// Aktuelle Adresse – auch für noch nicht geladene, wiederhergestellte Tabs.
+    var currentURL: String { webView.url?.absoluteString ?? pendingURL ?? addressText }
 
     /// Blockiert neue Tabs/Fenster und automatische Weiterleitungen auf fremde Seiten.
     private(set) var blockerEnabled: Bool
@@ -49,7 +58,16 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
     private var contentRules: WKContentRuleList?
     private var cancellables = Set<AnyCancellable>()
 
-    init(url: String, blockerEnabled: Bool, adblockEnabled: Bool, contentRules: WKContentRuleList?) {
+    init(
+        id: UUID = UUID(),
+        url: String,
+        title: String = "",
+        loadNow: Bool = true,
+        blockerEnabled: Bool,
+        adblockEnabled: Bool,
+        contentRules: WKContentRuleList?
+    ) {
+        self.id = id
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -68,8 +86,33 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         webView.uiDelegate = self
         installUserScripts()
         setContentRules(contentRules)
+        self.title = title
+        addressText = url
+        snapshot = UIImage(contentsOfFile: snapshotFile.path)
         observeWebView()
+        if loadNow { load(url) } else { pendingURL = url }
+    }
+
+    /// Lädt einen wiederhergestellten Tab beim ersten Anzeigen.
+    func activate() {
+        guard let url = pendingURL else { return }
+        pendingURL = nil
         load(url)
+    }
+
+    // MARK: - Vorschaubild
+
+    private static let snapshotDirectory: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("TabSnapshots", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    private var snapshotFile: URL { Self.snapshotDirectory.appendingPathComponent("\(id.uuidString).jpg") }
+
+    func deleteSnapshot() {
+        try? FileManager.default.removeItem(at: snapshotFile)
     }
 
     private func observeWebView() {
@@ -77,12 +120,20 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         webView.publisher(for: \.canGoForward).assign(to: &$canGoForward)
         webView.publisher(for: \.isLoading).assign(to: &$isLoading)
         webView.publisher(for: \.estimatedProgress).assign(to: &$progress)
-        webView.publisher(for: \.title).map { $0 ?? "" }.assign(to: &$title)
+        webView.publisher(for: \.title)
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .sink { [weak self] title in
+                self?.title = title
+                self?.onStateChange?()
+            }
+            .store(in: &cancellables)
         webView.publisher(for: \.url)
             .compactMap { $0?.absoluteString }
             .sink { [weak self] url in
-                guard let self, !self.isEditingAddress else { return }
-                self.addressText = url
+                guard let self else { return }
+                if !self.isEditingAddress { self.addressText = url }
+                self.onStateChange?()
             }
             .store(in: &cancellables)
     }
@@ -156,6 +207,10 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         config.snapshotWidth = 400
         if let image = try? await webView.takeSnapshot(configuration: config) {
             snapshot = image
+            let file = snapshotFile
+            Task.detached(priority: .utility) {
+                try? image.jpegData(compressionQuality: 0.6)?.write(to: file)
+            }
         }
     }
 

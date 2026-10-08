@@ -2,13 +2,17 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var tabs = TabManager()
+    @StateObject private var favorites = Favorites()
     @State private var showTabs = false
+    @State private var showFavorites = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
             if let tab = tabs.selected {
                 // .id: beim Tab-Wechsel wird die Ansicht samt WebView neu aufgebaut.
-                BrowserView(browser: tab, tabs: tabs, showTabs: $showTabs)
+                BrowserView(browser: tab, tabs: tabs, favorites: favorites,
+                            showTabs: $showTabs, showFavorites: $showFavorites)
                     .id(tab.id)
             } else {
                 ProgressView()
@@ -18,6 +22,18 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showTabs) {
             TabOverview(tabs: tabs)
         }
+        .sheet(isPresented: $showFavorites) {
+            FavoritesView(favorites: favorites) { favorite, inNewTab in
+                if inNewTab {
+                    tabs.newTab(url: favorite.url)
+                } else {
+                    tabs.selected?.load(favorite.url)
+                }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { tabs.saveTabs() }
+        }
     }
 }
 
@@ -25,15 +41,20 @@ struct ContentView: View {
 struct BrowserView: View {
     @ObservedObject var browser: BrowserModel
     @ObservedObject var tabs: TabManager
+    @ObservedObject var favorites: Favorites
     @ObservedObject private var adBlock: AdBlockManager
     @Binding var showTabs: Bool
+    @Binding var showFavorites: Bool
     @FocusState private var addressFocused: Bool
 
-    init(browser: BrowserModel, tabs: TabManager, showTabs: Binding<Bool>) {
+    init(browser: BrowserModel, tabs: TabManager, favorites: Favorites,
+         showTabs: Binding<Bool>, showFavorites: Binding<Bool>) {
         self.browser = browser
         self.tabs = tabs
+        self.favorites = favorites
         self.adBlock = tabs.adBlock
         self._showTabs = showTabs
+        self._showFavorites = showFavorites
     }
 
     var body: some View {
@@ -47,6 +68,8 @@ struct BrowserView: View {
                 .overlay(alignment: .bottom) { blockedBanner }
             toolbar
         }
+        // Wiederhergestellte Tabs laden erst, wenn sie angezeigt werden.
+        .onAppear { browser.activate() }
     }
 
     private var addressBar: some View {
@@ -70,6 +93,7 @@ struct BrowserView: View {
                         browser.addressText = url.absoluteString
                     }
                 }
+            favoriteButton
             Button(action: browser.reloadOrStop) {
                 Image(systemName: browser.isLoading ? "xmark" : "arrow.clockwise")
             }
@@ -87,6 +111,13 @@ struct BrowserView: View {
             Button(action: browser.goForward) { Image(systemName: "chevron.right") }
                 .disabled(!browser.canGoForward)
             Spacer()
+            Button {
+                showFavorites = true
+            } label: {
+                Image(systemName: "book")
+            }
+            .accessibilityLabel("Favoriten")
+            Spacer()
             tabsButton
             Spacer()
             adblockToggle
@@ -94,9 +125,21 @@ struct BrowserView: View {
             blockerToggle
         }
         .font(.title3)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    /// Stern: aktuelle Seite als Favorit speichern oder entfernen.
+    private var favoriteButton: some View {
+        let isFavorite = favorites.contains(browser.currentURL)
+        return Button {
+            favorites.toggle(url: browser.currentURL, title: browser.title)
+        } label: {
+            Image(systemName: isFavorite ? "star.fill" : "star")
+                .foregroundStyle(isFavorite ? .yellow : .accentColor)
+        }
+        .accessibilityLabel(isFavorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen")
     }
 
     /// Öffnet die Tab-Übersicht; zeigt die Anzahl offener Tabs.

@@ -37,6 +37,13 @@ Der Zähler am Hand-Button zeigt, wie viele Videowerbungen entfernt wurden.
 ## Tabs
 Tab-Button unten (zeigt die Anzahl) → Übersicht im Opera-Stil mit Vorschaubild jeder Seite:
 antippen zum Wechseln, ✕ zum Schließen, + für neuen Tab.
+Offene Tabs (Adresse, Titel, Vorschaubild, aktiver Tab) werden gespeichert und beim nächsten Start wiederhergestellt.
+Wiederhergestellte Tabs laden erst, wenn man sie öffnet.
+
+## Favoriten
+☆ neben der Adressleiste speichert die aktuelle Seite (★ = gespeichert, nochmal tippen entfernt sie).
+Das Buch-Symbol unten öffnet die Liste: antippen öffnet die Seite, gedrückt halten → „In neuem Tab öffnen“,
+„Umbenennen“, „Löschen“; „Bearbeiten“ zum Sortieren.
 Webseiten selbst können weiterhin keine Tabs öffnen. Neu laden sitzt rechts neben der Adressleiste.
 
 Startseite und Suchmaschine: Yandex.
